@@ -2,7 +2,7 @@ name: Daily Research Agent
 
 on:
   schedule:
-    - cron: '30 5 * * *' # Runs every day at 13:00 UTC (8:00 AM EST)
+    - cron: '0 6 * * *' 
   workflow_dispatch: # Allows you to run it manually
 
 jobs:
