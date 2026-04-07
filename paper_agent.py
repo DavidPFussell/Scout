@@ -12,7 +12,7 @@ from openai import OpenAI
 NEG = " -vision -image -video -diffusion -cv"
 ARXIV_QUERY = f'(cat:cs.CL OR cat:cs.LG OR cat:cs.AI){NEG}'
 NEWS_RSS = f"https://news.google.com/rss/search?q=AI+LLM+OR+Agents+OR+NLP+-vision+-image+-video+-diffusion&hl=en-US&gl=US&ceid=US:en"
-LLM_MODEL = "gpt-4o-mini"
+LLM_MODEL = "gpt-4.1-mini"
 
 # Banned words for manual Python filtering (Vision/Image stuff)
 BANNED_WORDS = ['vision', 'image', 'video', 'diffusion', 'depth', 'segmentation', 'gan', 'generative art', 'stable-diffusion']
