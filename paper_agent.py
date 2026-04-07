@@ -8,11 +8,10 @@ import re
 from openai import OpenAI
 
 # --- Configuration ---
-# Exclude computer vision (CV) and image generation (IG)
-NEG_KEYWORDS = " -vision -image -video -diffusion -generative-art -cv"
-ARXIV_QUERY = f'(cat:cs.CL OR cat:cs.LG OR cat:cs.AI){NEG_KEYWORDS}'
-# Specific GitHub query for LLMs, Agents, and NLP
-GITHUB_QUERY = f'topic:llm OR topic:agents OR topic:nlp OR topic:rag{NEG_KEYWORDS}'
+NEG = " -vision -image -video -diffusion -cv"
+ARXIV_QUERY = f'(cat:cs.CL OR cat:cs.LG OR cat:cs.AI){NEG}'
+# Use keywords instead of topics for better reach
+GITHUB_QUERY = f'llm OR "large language model" OR agents OR rag OR nlp{NEG}'
 NEWS_RSS = f"https://news.google.com/rss/search?q=AI+LLM+OR+Agents+OR+NLP+-vision+-image+-video+-diffusion&hl=en-US&gl=US&ceid=US:en"
 LLM_MODEL = "gpt-4.1-mini"
 
@@ -24,73 +23,82 @@ def detect_code_link(text):
 
 # --- Source Fetchers ---
 def get_arxiv_papers():
-    print("Fetching ArXiv (NLP/LLM focus)...")
-    client = arxiv.Client(page_size=25, delay_seconds=3.0, num_retries=5)
-    search = arxiv.Search(query=ARXIV_QUERY, max_results=25, sort_by=arxiv.SortCriterion.SubmittedDate)
+    print("Fetching ArXiv...")
+    client = arxiv.Client(page_size=20, delay_seconds=3.0, num_retries=5)
+    search = arxiv.Search(query=ARXIV_QUERY, max_results=20, sort_by=arxiv.SortCriterion.SubmittedDate)
     return [{"title": r.title, "desc": r.summary[:500], "url": r.entry_id, "code_url": detect_code_link(r.summary)} for r in client.results(search)]
 
 def get_hf_papers():
     print("Fetching Hugging Face...")
     try:
         response = requests.get("https://huggingface.co/api/papers", timeout=10)
-        # HF doesn't support negative keywords in API, so we filter manually
         ignore = ['vision', 'image', 'video', 'diffusion', 'depth', 'segmentation']
         return [{"title": x['title'], "desc": "Trending on HF.", "url": f"https://huggingface.co/papers/{x['id']}", "code_url": None} 
                 for x in response.json() if not any(word in x['title'].lower() for word in ignore)][:15]
     except Exception as e: print(f"HF Error: {e}"); return []
 
 def get_github_trending():
-    print("Fetching GitHub (Authenticated)...")
+    print("Fetching GitHub...")
     token = os.getenv("GITHUB_TOKEN")
-    headers = {"Authorization": f"token {token}"} if token else {}
+    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"} if token else {}
     
-    yesterday = (datetime.datetime.now() - datetime.timedelta(days=2)).strftime('%Y-%m-%d')
-    url = f"https://api.github.com/search/repositories?q={GITHUB_QUERY}+pushed:>{yesterday}&sort=stars&order=desc"
+    # Check repos updated in the last 7 days (broader than 2 days to ensure results)
+    since_date = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+    url = f"https://api.github.com/search/repositories?q={GITHUB_QUERY}+pushed:>{since_date}&sort=stars&order=desc"
     
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 403:
-            print("GitHub Rate Limited. Try again later.")
-            return []
-        items = response.json().get('items', [])
-        return [{"title": x['full_name'], "desc": x.get('description', ''), "url": x['html_url'], "code_url": x['html_url']} for x in items[:15]]
-    except Exception as e: print(f"GitHub Error: {e}"); return []
+        response = requests.get(url, headers=headers, timeout=15)
+        print(f"GitHub Status Code: {response.status_code}")
+        
+        data = response.json()
+        items = data.get('items', [])
+        print(f"GitHub Found {len(items)} total items.")
+        
+        results = []
+        for x in items[:15]:
+            results.append({
+                "title": x['full_name'],
+                "desc": x.get('description', '') or "AI Project",
+                "url": x['html_url'],
+                "code_url": x['html_url']
+            })
+        return results
+    except Exception as e: 
+        print(f"GitHub Error: {e}")
+        return []
 
 def get_ai_news():
-    print("Fetching News (No images/video)...")
+    print("Fetching News...")
     try:
         feed = feedparser.parse(NEWS_RSS)
-        return [{"title": x.title, "desc": "NLP/LLM industry news.", "url": x.link, "code_url": None} for x in feed.entries[:15]]
+        return [{"title": x.title, "desc": "NLP/LLM News.", "url": x.link, "code_url": None} for x in feed.entries[:15]]
     except Exception as e: print(f"News Error: {e}"); return []
 
 # --- THE BRAIN ---
 def process_source(source_name, items):
-    if not items: return []
-    print(f"Brain is filtering and ranking {source_name}...")
-    
+    if not items:
+        print(f"Skipping {source_name} - No items found.")
+        return []
+        
+    print(f"Brain is filtering {len(items)} items from {source_name}...")
     input_data = [{"id": i, "title": item['title'], "desc": item['desc'][:300]} for i, item in enumerate(items)]
 
     prompt = f"""
-    You are an AI Research Scout focusing EXCLUSIVELY on NLP, LLMs, Multi-Agent Systems, and RAG.
+    Focus EXCLUSIVELY on NLP, LLMs, Agents, and RAG. 
+    Pick the TOP 5 items.
     
-    STRICT RULE: Ignore any item related to:
-    - Computer Vision
-    - Image Generation (Stable Diffusion, Midjourney, etc.)
-    - Video Generation (Sora, etc.)
-    - Medical Imaging
+    Data: {json.dumps(input_data)}
     
-    Pick the top 5 relevant items from this {source_name} list.
     Return JSON only: {{"selections": [{{"id": 0, "summary": "...", "hype": 1-10, "cat": "tag"}}, ...]}}
     """
 
     try:
         response = client_ai.chat.completions.create(
             model=LLM_MODEL,
-            messages=[{"role": "system", "content": "Professional NLP researcher. JSON only."},
-                      {"role": "user", "content": f"{prompt}\n\nData: {json.dumps(input_data)}"}],
+            messages=[{"role": "system", "content": "Professional NLP researcher. Output JSON."},
+                      {"role": "user", "content": prompt}],
             response_format={ "type": "json_object" }
         )
-        
         raw_data = json.loads(response.choices[0].message.content)
         selections = raw_data.get('selections', [])
         
@@ -108,26 +116,32 @@ def process_source(source_name, items):
                 }
             })
         return blocks
-    except Exception: return []
+    except Exception as e: 
+        print(f"Brain Error for {source_name}: {e}")
+        return []
 
 def send_to_slack(all_blocks):
     url = os.getenv("SLACK_WEBHOOK")
     if url: 
-        # Send in chunks of 30 blocks to stay under Slack's limit
         for i in range(0, len(all_blocks), 30):
             requests.post(url, json={"blocks": all_blocks[i:i+30]})
 
 if __name__ == "__main__":
-    final_blocks = [{"type": "header", "text": {"type": "plain_text", "text": "🧠 NLP & LLM Scout: Top 20"}}]
+    final_blocks = [{"type": "header", "text": {"type": "plain_text", "text": "🧠 NLP & LLM Scout: Daily Report"}}]
+    
     sources = {
         "ArXiv Papers": get_arxiv_papers(),
         "Hugging Face": get_hf_papers(),
         "GitHub Repos": get_github_trending(),
         "Industry News": get_ai_news()
     }
+    
     for name, data in sources.items():
         res = process_source(name, data)
         if res:
             final_blocks.extend(res)
             final_blocks.append({"type": "divider"})
-    if len(final_blocks) > 1: send_to_slack(final_blocks)
+            
+    if len(final_blocks) > 1:
+        send_to_slack(final_blocks)
+        print("Scout mission success.")
