@@ -90,7 +90,7 @@ def summarize_and_rank(all_items):
 
     prompt = f"""
     You are a Research Scout. I have {len(all_items)} items from ArXiv, Hugging Face, and GitHub.
-    1. Select the top 5 most interesting items.
+    1. Select the top 20 most interesting items.
     2. Provide a 1-2 sentence summary for each.
     3. Categorize each (e.g., 'Model', 'Dataset', 'Tool', 'Research').
     
