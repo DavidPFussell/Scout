@@ -83,11 +83,18 @@ def summarize_papers(papers):
 
 def send_to_slack(blocks):
     webhook_url = os.getenv("SLACK_WEBHOOK")
-    if webhook_url and blocks:
-        payload = {"blocks": blocks}
-        response = requests.post(webhook_url, json=payload)
-        if response.status_code != 200:
-            print(f"Error sending to Slack: {response.text}")
+    
+    if not webhook_url:
+        print("❌ ERROR: SLACK_WEBHOOK is not set in GitHub Secrets!")
+        return
+
+    payload = {"blocks": blocks}
+    response = requests.post(webhook_url, json=payload)
+    
+    if response.status_code == 200:
+        print("✅ SUCCESS: Message accepted by Slack!")
+    else:
+        print(f"❌ SLACK ERROR: {response.status_code} - {response.text}")
 
 if __name__ == "__main__":
     print("Starting scout...")
@@ -95,8 +102,9 @@ if __name__ == "__main__":
     print(f"Found {len(new_papers)} recent papers.")
     
     report_blocks = summarize_papers(new_papers)
+    
     if report_blocks:
+        # This will now give us a real status update
         send_to_slack(report_blocks)
-        print("Report sent to Slack!")
     else:
-        print("No new papers found or error occurred.")
+        print("⚠️ No papers were summarized (check OpenAI API or paper count).")
